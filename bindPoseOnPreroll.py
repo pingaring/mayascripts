@@ -1,16 +1,15 @@
 """
-Maya script to set pre-roll on bind pose at frame 900
-unwantedAttributes is a list of control attributes we don't want to set to its default value
+Maya script to set pre-roll on bind pose at frame 900 assuming character controls are selected.
 """
 
 import pymel.core as pm
 import maya.cmds as cmds
 
-holdPoseFrame = 985
-bindPoseFrame = 900
-firstAnimationFrame = 1000
+HOLD_POSE_FRAME = 985
+BIND_POSE_FRAME = 915
+FIRST_ANIMATION_FRAME = 1000
 
-# list of attributes we don't want to set to default values
+# List of attributes we don't want to set to default values.
 UNWANTED_ATTRIBUTES = [
     "switchIkFk",
     "Hair",
@@ -19,74 +18,96 @@ UNWANTED_ATTRIBUTES = [
     "Front_Legs",
     "Back_Legs",
     "Body",
-    "C_characterNode_CTL"
-    ]
-
-def suspend_viewport(boolean):
-    if boolean == "suspendTrue":
-        print("Suspending viewport refresh...")
-        cmds.refresh(suspend=True)
-        print("Viewport refresh suspended.")
-
-    elif boolean == "suspendFalse":
-        print("Unsuspending viewport refresh...")
-        cmds.refresh(suspend=False)
-        print("Viewport refresh unsuspended.")
+    "C_characterNode_CTL",
+]
 
 
-def select_all_controls_from_rig():
-    selection = cmds.ls(selection=True)
-    namespaces = []
-    for sel in selection:
-        namespacer = sel.rpartition(':')[0]
-        if namespacer not in namespaces:
-            namespaces.append(namespacer)
+class BindPoseOnPreroll:
+    def __init__(self):
+        pass
 
-    cmds.select(clear=True)
-    for i in namespaces:
-        cmds.select(i + ":*_CTL", add=True)
+    def select_all_controls_from_rig(self):
+        selection = cmds.ls(selection=True)
 
+        # We want to create a list of unique character names so we can run the tool on more than one character at a time
+        namespaces = []
 
-def set_attributes_to_default_values():
-    selection = cmds.ls(long=True, selection=True)
-    for controller in selection:
-        attributes = cmds.listAttr(controller, keyable=True, unlocked=True, visible=True, write=True)
-        if attributes is not None:
-            for attribute in attributes:
-                defaultValue = cmds.attributeQuery(attribute, node=(controller + "." + attribute), listDefault=True)
-                if cmds.getAttr(controller + "." + attribute) != defaultValue and \
-                        attribute not in UNWANTED_ATTRIBUTES and defaultValue is not None:
+        for sel in selection:
+            namespacer = sel.rpartition(":")[0]
+            if namespacer not in namespaces:
+                namespaces.append(namespacer)
 
-                    # try/except used to avoid errors when keying attributes with connected attributes
-                    try:
-                        cmds.setAttr((controller + "." + attribute), defaultValue[0])
-                    except:
-                        pass
-    cmds.setKeyframe()
+        cmds.select(clear=True)
 
+        for namespace in namespaces:
+            cmds.select(namespace + ":*_CTL", add=True)
 
-def bind_pose_on_preroll():
-    # Main function of the bindPoseOnPreroll tool.
-    with pm.UndoChunk():
-        # We want to suspend viewport refresh to reduce potential viewport lag while the tool is running
-        suspend_viewport("suspendTrue")
-        select_all_controls_from_rig()
-        cmds.currentTime(firstAnimationFrame, edit=True)
+    def set_attributes_to_default_values(self, key_tangent="linear"):
+        selection = cmds.ls(long=True, selection=True)
 
-        # insert=True so we don't change the tangent curves
-        cmds.setKeyframe(insert=True)
-        cmds.currentTime(holdPoseFrame, edit=True)
+        # We are filtering through each controller and then filtering through each attribute from the above selection
+        for controller in selection:
+            attributes = cmds.listAttr(
+                controller, keyable=True, unlocked=True, visible=True, write=True
+            )
 
-        # We want to use "auto" tangent curves so we don't see unwanted interpolation between keys
-        cmds.setKeyframe(inTangentType="auto", outTangentType="auto")
-        cmds.currentTime(bindPoseFrame, edit=True)
-        set_attributes_to_default_values()
+            # Skipping over controllers that don't have any attributes
+            if attributes is not None:
+                for attribute in attributes:
 
-        # Unsuspending the viewport
-        suspend_viewport("suspendFalse")
-        cmds.currentTime(firstAnimationFrame, edit=True)
-        cmds.select(deselect=True)
+                    # Finding the default value of the attribute
+                    defaultValue = cmds.attributeQuery(
+                        attribute, node=(controller + "." + attribute), listDefault=True
+                    )
+
+                    # We don't want to key attributes found in UNWANTED_ATTRIBUTES or if the value is already
+                    # at the default value
+                    if (
+                        cmds.getAttr(controller + "." + attribute) != defaultValue
+                        and attribute not in UNWANTED_ATTRIBUTES
+                        and defaultValue is not None
+                    ):
+
+                        # try/except used to avoid errors when keying attributes with connected attributes
+                        # todo try to remove the try/except with better code
+                        try:
+                            cmds.setAttr(
+                                (controller + "." + attribute), defaultValue[0]
+                            )
+                        except:
+                            pass
+
+        cmds.setKeyframe(outTangentType=key_tangent)
+
+    def run_bind_pose_on_preroll(self):
+        # Main function of the bindPoseOnPreroll tool.
+        with pm.UndoChunk():
+
+            # We want to suspend viewport refresh to reduce potential viewport lag while the tool is running
+            cmds.refresh(suspend=True)
+
+            # Select all available controls on the selected characters
+            self.select_all_controls_from_rig()
+
+            # Moving to and setting a key at the first animation frame
+            cmds.currentTime(FIRST_ANIMATION_FRAME, edit=True)
+            cmds.setKeyframe(insert=True, inTangentType="auto")
+
+            # Moving to and setting a key at the hold pose frame
+            cmds.currentTime(HOLD_POSE_FRAME, edit=True)
+            cmds.setKeyframe(inTangentType="linear", outTangentType="auto")
+
+            # Moving to and setting a key at the bind pose frame using default controller values
+            cmds.currentTime(BIND_POSE_FRAME, edit=True)
+            self.set_attributes_to_default_values()
+
+            # Unsuspending the viewport
+            cmds.refresh(suspend=False)
+
+            cmds.currentTime(FIRST_ANIMATION_FRAME, edit=True)
+            cmds.select(deselect=True)
 
 
 if __name__ == "__main__":
-    bind_pose_on_preroll()
+    preroll = BindPoseOnPreroll()
+    preroll.run_bind_pose_on_preroll()
